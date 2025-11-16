@@ -1,0 +1,142 @@
+services:
+  traefik:
+    image: "traefik"
+    container_name: traefik-demo-1
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/traefik.yaml:/etc/traefik/traefik.yaml:ro
+    networks:
+      - frontend
+    restart: unless-stopped
+
+  n8n:
+    build: .
+    container_name: n8n-demo-1
+    image: n8n-custom:latest
+    networks:
+      - frontend
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`n8n.${DOMAIN_NAME}`)
+      - traefik.http.routers.n8n.entrypoints=websecure
+      - traefik.http.routers.n8n.tls.certresolver=letsencrypt
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+    environment:
+      - N8N_HOST=n8n.${DOMAIN_NAME}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://n8n.${DOMAIN_NAME}/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_DATA_FOLDER=/home/node/.n8n
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./local-files:/files
+      - ./saap:/home/node/saap
+  evolution-api:
+    container_name: evolution_api
+    image: evoapicloud/evolution-api:v2.3.2
+    networks:
+      - frontend
+    labels:
+
+      # Console (UI)
+      - traefik.enable=true
+      - traefik.http.routers.evolution.rule=Host(`evolution.${DOMAIN_NAME}`)
+      - traefik.http.routers.evolution.entrypoints=websecure
+      - traefik.http.routers.evolution.tls.certresolver=letsencrypt
+      - traefik.http.services.evolution.loadbalancer.server.port=8080
+
+    restart: always
+    env_file:
+      - evolution.env
+    volumes:
+      - evolution_instances:/evolution/instance
+    depends_on:
+      - redis
+      - postgres
+
+  redis:
+    image: redis:latest
+    networks:
+      - frontend
+    container_name: redis
+    command: >
+      redis-server --port 6379 --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    restart: always
+
+
+  postgres:
+    container_name: postgres
+    image: postgres:15
+    networks:
+      - frontend
+
+    command: [
+      "postgres",
+      "-c", "max_connections=200",
+      "-c", "listen_addresses=*",
+      "-c", "shared_buffers=256MB",
+      "-c", "effective_cache_size=1GB",
+      "-c", "work_mem=4MB"
+    ]
+    restart: always
+    environment:
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=evolution
+      - POSTGRES_DB=evolution_db
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-18T00-31-37Z-cpuv1
+    container_name: minio
+
+    labels:
+
+      - traefik.enable=true
+
+      # Minio
+      - traefik.http.routers.minio.rule=Host(`minio.${DOMAIN_NAME}`)
+      - traefik.http.routers.minio.entrypoints=websecure
+      - traefik.http.routers.minio.tls.certresolver=letsencrypt
+      - traefik.http.routers.minio.service=minio-svc
+      - traefik.http.services.minio-svc.loadbalancer.server.port=9001
+
+      # S3
+      - traefik.http.routers.s3.rule=Host(`s3.${DOMAIN_NAME}`)
+      - traefik.http.routers.s3.entrypoints=websecure
+      - traefik.http.routers.s3.tls.certresolver=letsencrypt
+      - traefik.http.routers.s3.service=s3-svc
+      - traefik.http.services.s3-svc.loadbalancer.server.port=9000
+
+    environment:
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: 
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - frontend
+    restart: always
+
+networks:
+  frontend:
+    external: true
+
+volumes:
+  traefik_data:
+  n8n_data:
+  evolution_instances:
+  evolution_redis:
+  postgres_data:
+  minio_data:

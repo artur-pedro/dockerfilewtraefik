@@ -1,0 +1,25 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+log:
+  level: DEBUG
+api:
+  dashboard: true
+  insecure: true
+entryPoints:
+  web:
+    address: :80
+  websecure:
+    address: :443
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email:        # seu email para registro no Let's Encrypt
+      storage: /letsencrypt/acme.json                 # arquivo onde Traefik salva os certificados
+      httpChallenge:
+        entryPoint: web                 # usa desafio HTTP para validação
